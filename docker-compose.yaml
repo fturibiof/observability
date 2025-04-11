@@ -1,0 +1,80 @@
+networks:
+  loki:
+
+services:
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - loki
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/log:/var/log
+      - ./promtail/promtail-config.yaml:/etc/promtail/config.yml
+      - C:/Users/fturi/Documents/finance-service/logs:/var/log/finance
+      - C:/Users/fturi/Documents/analytics-service/logs:/var/log/analytics
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - loki
+
+  grafana:
+    environment:
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_FEATURE_TOGGLES_ENABLE=alertingSimplifiedRouting,alertingQueryAndExpressionsStepMode
+    entrypoint:
+      - sh
+      - -euc
+      - |
+        mkdir -p /etc/grafana/provisioning/datasources
+        cat <<EOF > /etc/grafana/provisioning/datasources/ds.yaml
+        apiVersion: 1
+        datasources:
+        - name: Loki
+          type: loki
+          access: proxy 
+          orgId: 1
+          url: http://loki:3100
+          basicAuth: false
+          isDefault: true
+          version: 1
+          editable: false
+        EOF
+        /run.sh
+    image: grafana/grafana:latest
+    ports:
+      - "3002:3000"
+    networks:
+      - loki
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - loki
+
+  tempo:
+    image: grafana/tempo:latest
+    ports:
+      - "3200:3200" # Tempo's API
+      - "4318:4318" # OTLP HTTP port (used by OpenTelemetry SDKs)
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+      - ./overrides.yaml:/etc/tempo/overrides.yaml
+      - tempo-data:/var/tempo/traces
+    command: ["--config.file=/etc/tempo.yaml"]
+    # command: ["--config.file=/etc/tempo.yaml", "--server.http-bind-address=0.0.0.0:3200", "--tempo.otlp.http.server.address=0.0.0.0:4318"]
+    networks:
+      - loki
+
+volumes:
+  tempo-data:
